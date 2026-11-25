@@ -94,6 +94,135 @@ jobs:
           xcrun simctl boot "$UDID" || true
           xcrun simctl bootstatus "$UDID" -b
           xcrun simctl install "$UDID" ios/build-sim/Build/Products/Release-iphonesimulator/SkyMapEditor.app
+          BRIDGE=$(xcrun simctl get_app_container "$UDID" com.skyeditor.ios data)
+          echo "BRIDGE=$BRIDGE"
+
+          wait_for_log() {
+            for _ in $(seq 1 40); do
+              [ -f "$BRIDGE/Documents/boot.log" ] && grep -q "$1" "$BRIDGE/Documents/boot.log" && return 0
+              sleep 1
+            done
+            return 1
+          }
+
+          # 1) 启动冒烟：内置演示地形必须画出首帧
+          xcrun simctl terminate "$UDID" com.skyeditor.ios || true
+          xcrun simctl launch "$UDID" com.skyeditor.ios --demo
+          if ! wait_for_log "首帧完成"; then
+            echo "demo first frame missing"
+            cat "$BRIDGE/Documents/boot.log" || true
+            ls -t ~/Library/Logs/DiagnosticReports 2>/dev/null | head -5 || true
+            exit 1
+          fi
+          cat "$BRIDGE/Documents/boot.log"
+          xcrun simctl io "$UDID" screenshot /tmp/demo.png
+          /tmp/qa-venv/bin/python qa/check_demo.py /tmp/demo.png
+
+          # 2) 导入自测（结构化夹具，走 App 内的导入路径）
+          python3 qa/make_fixture.py /tmp/fixture
+          (cd /tmp/fixture && zip -qry /tmp/test-import.zip Payload)
+          xcrun simctl terminate "$UDID" com.skyeditor.ios || true
+          rm -rf "$BRIDGE/Documents/Data"
+          rm -f "$BRIDGE/Documents/"*.zip
+          cp /tmp/test-import.zip "$BRIDGE/Documents/"
+          xcrun simctl launch "$UDID" com.skyeditor.ios --import-inbox
+          if ! wait_for_log "inbox-import-ok"; then
+            echo "inbox import failed"
+            cat "$BRIDGE/Documents/boot.log" || true
+            exit 1
+          fi
+          test -f "$BRIDGE/Documents/Data/Levels/Demo/Objects.level.bin"
+          xcrun simctl terminate "$UDID" com.skyeditor.ios || true
+          xcrun simctl launch "$UDID" com.skyeditor.ios --selftest
+          if ! wait_for_log "selftest-done 1/1"; then
+            echo "synthetic selftest failed"
+            cat "$BRIDGE/Documents/boot.log" || true
+            exit 1
+          fi
+          echo "synthetic import+parse OK"
+
+          # 3) 真实地图：导入两张真图，逐张解析，再真渲染一张并截图
+          (cd qa/realfixture && zip -qry /tmp/real-data.zip Data)
+          xcrun simctl terminate "$UDID" com.skyeditor.ios || true
+          rm -rf "$BRIDGE/Documents/Data"
+          rm -f "$BRIDGE/Documents/"*.zip
+          cp /tmp/real-data.zip "$BRIDGE/Documents/"
+          xcrun simctl launch "$UDID" com.skyeditor.ios --import-inbox
+          if ! wait_for_log "inbox-import-ok"; then
+            echo "real data import failed"
+            cat "$BRIDGE/Documents/boot.log" || true
+            exit 1
+          fi
+          test -f "$BRIDGE/Documents/Data/Levels/CandleSpace/BstBaked.meshes"
+          xcrun simctl terminate "$UDID" com.skyeditor.ios || true
+          xcrun simctl launch "$UDID" com.skyeditor.ios --selftest
+          sleep 20
+          cat "$BRIDGE/Documents/boot.log"
+          if ! grep -q "selftest-done 2/2" "$BRIDGE/Documents/boot.log"; then
+            echo "real data selftest failed"
+            exit 1
+          fi
+          echo "real data parse OK"
+
+          xcrun simctl terminate "$UDID" com.skyeditor.ios || true
+          xcrun simctl launch "$UDID" com.skyeditor.ios --open CandleSpace
+          if ! wait_for_log "open-ok CandleSpace"; then
+            echo "real level did not open"
+            cat "$BRIDGE/Documents/boot.log" || true
+            exit 1
+          fi
+          sleep 5
+          xcrun simctl io "$UDID" screenshot /tmp/real-candlespace.png
+          echo "real level rendered"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SkyMapEditor-unsigned-ipa
+          path: out/SkyMapEditor-unsigned.ipa
+
+  # 模拟器自测：不依赖真机，装进 iPhone 模拟器跑内置演示地形，截图判真。
+  # 判据：画面不能等于清屏色，否则说明管线一帧都没画上去。
+  sim-qa:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Compile Metal shaders (simulator)
+        run: |
+          set -euo pipefail
+          mkdir -p ios/Resources/Shaders
+          xcrun -sdk iphonesimulator metal -c ios/Shaders/Scene.metal -o /tmp/Scene-sim.air
+          xcrun -sdk iphonesimulator metallib /tmp/Scene-sim.air -o ios/Resources/Shaders/default.metallib
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Build for simulator
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          xcodebuild -project SkyMapEditor.xcodeproj -scheme SkyMapEditor \
+            -configuration Release -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build-sim \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            -quiet build
+
+      - name: Run demo on simulator
+        run: |
+          set -euo pipefail
+          python3 -m venv /tmp/qa-venv
+          /tmp/qa-venv/bin/pip install --quiet pillow
+          UDID=$(xcrun simctl list devices available -j | python3 qa/pick_sim.py)
+          echo "UDID=$UDID"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" ios/build-sim/Build/Products/Release-iphonesimulator/SkyMapEditor.app
 
           # 端到端自测：走用户在「文件」App 里拷贝、App 内点导入的同一条路。
           python3 qa/make_fixture.py /tmp/fixture
