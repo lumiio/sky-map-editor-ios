@@ -13,7 +13,18 @@ final class AppModel: ObservableObject {
 
     init() {
         refresh()
-        if ProcessInfo.processInfo.arguments.contains("--demo") {
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "--extract"), index + 1 < arguments.count {
+            let url = URL(fileURLWithPath: arguments[index + 1])
+            do {
+                try ZipImporter.extract(url, to: LevelStore.dataRoot) { Log.line("解压：\($0)") }
+                Log.line("解压测试通过")
+            } catch {
+                Log.line("解压测试失败：\(error)")
+            }
+            refresh()
+        }
+        if arguments.contains("--demo") {
             scene = LevelStore.demoScene()
             Log.line("演示地形已装载 \(scene?.triangleCount ?? 0) 三角形")
         }
@@ -27,6 +38,41 @@ final class AppModel: ObservableObject {
                 guard let self else { return }
                 self.levels = found
                 self.status = found.isEmpty ? "还没有导入地图" : "\(found.count) 张地图"
+            }
+        }
+    }
+
+    /// 文件夹和 zip/apk 都走这里。
+    func importSource(_ url: URL) {
+        let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+        if isDirectory {
+            importFolder(url)
+        } else {
+            importArchive(url)
+        }
+    }
+
+    func importArchive(_ url: URL) {
+        importing = true
+        error = nil
+        status = "正在解压 \(url.lastPathComponent)…"
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            do {
+                try ZipImporter.extract(url, to: LevelStore.dataRoot) { message in
+                    DispatchQueue.main.async { self?.status = message }
+                }
+                DispatchQueue.main.async {
+                    self?.importing = false
+                    self?.status = "导入完成"
+                    self?.refresh()
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self?.importing = false
+                    self?.error = "导入失败：\(error)"
+                }
             }
         }
     }

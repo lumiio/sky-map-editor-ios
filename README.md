@@ -7,7 +7,8 @@
 - [x] 工程骨架 + CI 出未签名 ipa
 - [ ] TGCL / LVL0 / 地形解析
 - [ ] Metal 地形与对象渲染
-- [ ] 导入 Data、对象树、编辑与保存
+- [x] 一键导入：选 zip / apk / Data 文件夹，自动解出 Levels + Meshes
+- [x] 对象树、字段编辑、写回（自动备份）
 
 ## 构建
 

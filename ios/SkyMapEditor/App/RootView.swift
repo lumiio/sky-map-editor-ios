@@ -55,9 +55,9 @@ struct RootView: View {
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
             }
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.folder]) { result in
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: importTypes) { result in
             switch result {
-            case .success(let url): model.importFolder(url)
+            case .success(let url): model.importSource(url)
             case .failure(let error): model.error = "\(error)"
             }
         }
@@ -84,6 +84,12 @@ struct RootView: View {
         }
     }
 
+    private var importTypes: [UTType] {
+        var types: [UTType] = [.folder, .zip]
+        if let apk = UTType(filenameExtension: "apk") { types.append(apk) }
+        return types
+    }
+
     private var levelList: some View {
         NavigationStack {
             Group {
@@ -91,9 +97,9 @@ struct RootView: View {
                     VStack(spacing: 14) {
                         Image(systemName: "square.stack.3d.up.slash").font(.system(size: 44)).opacity(0.5)
                         Text("还没有导入地图").font(.headline)
-                        Text("在「文件」App 里准备好 Sky 的 Data 目录\n（里面要有 Levels 和 Meshes），点下面的按钮选择它。\n只会复制 Levels 和 Meshes，不碰 Audio。")
+                        Text("把 Data 压成 zip（或者直接用编辑器 apk）传进「文件」App，\n点下面按钮选它就行，会自动解出 Levels 和 Meshes，\n不会碰 Audio。也可以选已经解压好的 Data 文件夹。")
                             .font(.callout).multilineTextAlignment(.center).opacity(0.7)
-                        Button("导入 Data / Levels") { showImporter = true }
+                        Button("导入 zip / apk / 文件夹") { showImporter = true }
                             .buttonStyle(.borderedProminent)
                         Button("先看内置演示地形") { model.openDemo() }
                             .buttonStyle(.bordered)
