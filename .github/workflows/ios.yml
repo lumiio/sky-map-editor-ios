@@ -95,34 +95,38 @@ jobs:
           xcrun simctl bootstatus "$UDID" -b
           xcrun simctl install "$UDID" ios/build-sim/Build/Products/Release-iphonesimulator/SkyMapEditor.app
 
-          # zip/apk 导入自测：造一个带 Data/Levels + Data/Meshes 的 deflate zip，
-          # 让 App 用 --extract 无界面解压，再核对解出来的字节。
-          python3 - <<'PY'
-          import zipfile
-          with zipfile.ZipFile("/tmp/test-import.zip", "w", zipfile.ZIP_DEFLATED) as z:
-              z.writestr("Data/Levels/DemoLevel/Objects.level.bin", "TGCL" + "x" * 500)
-              z.writestr("Data/Levels/DemoLevel/BstBaked.meshes", "LVL0" + "y" * 300)
-              z.writestr("assets/Data/Meshes/Bin/Demo.mesh", "MESH" + "z" * 100)
-          print("zip ok")
-          PY
+          # 端到端自测：造一个结构合法的关卡（ipa 布局），导入后让 App 真正解析一遍。
+          python3 qa/make_fixture.py /tmp/fixture
+          (cd /tmp/fixture && zip -qry /tmp/test-import.zip Payload)
           xcrun simctl terminate "$UDID" com.skyeditor.ios || true
           xcrun simctl launch "$UDID" com.skyeditor.ios --extract /tmp/test-import.zip
           sleep 12
           BRIDGE=$(xcrun simctl get_app_container "$UDID" com.skyeditor.ios data)
           echo "--- boot.log ---"
           cat "$BRIDGE/Documents/boot.log" || true
-          echo "--- tree ---"
-          find "$BRIDGE/Documents" -maxdepth 5 | head -40 || true
           if ! grep -q "extract-ok" "$BRIDGE/Documents/boot.log"; then
-            echo "extract marker missing"; exit 1
+            echo "extract failed"; exit 1
           fi
-          if [ ! -f "$BRIDGE/Documents/Data/Levels/DemoLevel/Objects.level.bin" ]; then
+          if [ ! -f "$BRIDGE/Documents/Data/Levels/Demo/Objects.level.bin" ]; then
             echo "missing Objects.level.bin"; exit 1
           fi
-          if [ ! -f "$BRIDGE/Documents/Data/Meshes/Bin/Demo.mesh" ]; then
-            echo "missing Demo.mesh"; exit 1
+          if [ ! -f "$BRIDGE/Documents/Data/Levels/Demo/BstBaked.meshes" ]; then
+            echo "missing BstBaked.meshes"; exit 1
           fi
           echo "zip import OK"
+
+          # 解析自测：导入的数据必须真的被 TGCL/LVL0 解析器读进去
+          xcrun simctl terminate "$UDID" com.skyeditor.ios || true
+          xcrun simctl launch "$UDID" com.skyeditor.ios --selftest
+          sleep 12
+          cat "$BRIDGE/Documents/boot.log" || true
+          if ! grep -q "selftest-done 1/1" "$BRIDGE/Documents/boot.log"; then
+            echo "selftest did not pass"; exit 1
+          fi
+          if ! grep -q "selftest ✅" "$BRIDGE/Documents/boot.log"; then
+            echo "selftest reported a failure"; exit 1
+          fi
+          echo "parse selftest OK"
 
           xcrun simctl terminate "$UDID" com.skyeditor.ios || true
           xcrun simctl launch "$UDID" com.skyeditor.ios --demo

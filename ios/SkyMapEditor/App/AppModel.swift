@@ -12,7 +12,6 @@ final class AppModel: ObservableObject {
     @Published var materialTint = false
 
     init() {
-        refresh()
         let arguments = ProcessInfo.processInfo.arguments
         if let index = arguments.firstIndex(of: "--extract"), index + 1 < arguments.count {
             let url = URL(fileURLWithPath: arguments[index + 1])
@@ -24,8 +23,25 @@ final class AppModel: ObservableObject {
                 Log.line("解压测试失败：\(error)")
                 Log.line("extract-failed")
             }
-            refresh()
         }
+        if arguments.contains("--selftest") {
+            let found = LevelStore.scan()
+            var passed = 0
+            for level in found {
+                do {
+                    let scene = try LevelStore.buildScene(level.name)
+                    Log.line("selftest ✅ \(level.name)：对象 \(scene.objectCount) / 三角形 \(scene.triangleCount) / 模型 \(scene.models?.modelCount ?? 0)")
+                    passed += 1
+                } catch {
+                    Log.line("selftest ❌ \(level.name)：\(error)")
+                }
+            }
+            Log.line("selftest-done \(passed)/\(found.count)")
+            levels = found
+            status = "\(found.count) 张地图"
+            return
+        }
+        refresh()
         if arguments.contains("--demo") {
             scene = LevelStore.demoScene()
             Log.line("演示地形已装载 \(scene?.triangleCount ?? 0) 三角形")
