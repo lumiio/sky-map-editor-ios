@@ -20,6 +20,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var depthReadState: MTLDepthStencilState?
 
     var camera = OrbitCamera()
+    /// 默认中性灰：材质表里的 color 是原版 shader 的调整色，没有贴图时直接显示会偏成品红。
+    var materialTintVisible = false
     private var pendingScene: LevelScene?
     private var draws: [GPUDraw] = []
     private(set) var sceneName = ""
@@ -271,7 +273,12 @@ final class Renderer: NSObject, MTKViewDelegate {
             encoder.setVertexBytes(&viewProj, length: MemoryLayout<simd_float4x4>.stride, index: 1)
             for batch in draw.plan.batches {
                 guard batch.pass == (kind == .skirt ? .skirt : (kind == .decal ? .decal : .opaque)) else { continue }
-                var color = SIMD4<Float>(draw.defs[batch.materialIndex].color, 1)
+                var color = SIMD4<Float>(1, 1, 1, 1)
+                if materialTintVisible, batch.materialIndex < draw.defs.count {
+                    color = SIMD4<Float>(draw.defs[batch.materialIndex].color, 1)
+                } else {
+                    color = SIMD4<Float>(0.78, 0.80, 0.82, 1)
+                }
                 var params = FragmentParams(materialId: UInt32(batch.materialId),
                                             alphaMode: kind == .opaque ? 0 : 1)
                 encoder.setFragmentBytes(&color, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)

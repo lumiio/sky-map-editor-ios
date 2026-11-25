@@ -9,6 +9,7 @@ final class AppModel: ObservableObject {
     @Published var importing = false
     @Published var selfTest: [String] = []
     @Published var showSelfTest = false
+    @Published var materialTint = false
 
     init() {
         refresh()

@@ -26,6 +26,13 @@ struct RootView: View {
                         }
                         Spacer()
                         Button {
+                            model.materialTint.toggle()
+                        } label: {
+                            Image(systemName: model.materialTint ? "paintpalette.fill" : "paintpalette")
+                                .font(.headline)
+                                .padding(10).background(.ultraThinMaterial, in: Circle())
+                        }
+                        Button {
                             showObjects = true
                         } label: {
                             Image(systemName: "list.bullet.indent").font(.headline)

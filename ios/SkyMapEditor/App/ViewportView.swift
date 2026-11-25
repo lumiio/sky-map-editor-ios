@@ -64,6 +64,7 @@ struct ViewportView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: MTKView, context: Context) {
+        context.coordinator.renderer?.materialTintVisible = model.materialTint
         guard context.coordinator.loadedScene != scene.name else { return }
         context.coordinator.loadedScene = scene.name
         context.coordinator.renderer?.setScene(scene)
