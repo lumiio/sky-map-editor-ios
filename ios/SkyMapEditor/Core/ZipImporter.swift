@@ -23,9 +23,14 @@ enum ZipImporter {
         guard let eocd = findEndOfCentralDirectory(data) else {
             throw FormatError.invalid("不是有效的 zip（找不到目录）")
         }
-        let entryCount = Int(u16(data, eocd + 10))
-        let directoryOffset = Int(u32(data, eocd + 16))
-        guard entryCount > 0, directoryOffset > 0, directoryOffset < data.count else {
+        var directoryOffset = Int(u32(data, eocd + 16))
+        if directoryOffset == 0xFFFF_FFFF || directoryOffset >= data.count {
+            // ZIP64：目录位置落在 ZIP64 结束记录里
+            if let zip64 = findZip64End(data, before: eocd) {
+                directoryOffset = Int(u64(data, zip64 + 48))
+            }
+        }
+        guard directoryOffset > 0, directoryOffset < data.count else {
             throw FormatError.invalid("zip 目录为空或损坏")
         }
 
@@ -36,9 +41,12 @@ enum ZipImporter {
         var written = 0
         var totalBytes = 0
         var skipped = 0
+        var entries = 0
 
-        for _ in 0..<entryCount {
-            guard cursor + 46 <= data.count, u32(data, cursor) == 0x0201_4b50 else { break }
+        // 目录项数量不依赖 EOCD 的 16 位字段：apk 很容易超过 65535 项，
+        // 这里一直读到签名不匹配为止。
+        while cursor + 46 <= data.count, u32(data, cursor) == 0x0201_4b50, entries < 400_000 {
+            entries += 1
             let method = u16(data, cursor + 10)
             var compressedSize = Int(u32(data, cursor + 20))
             var uncompressedSize = Int(u32(data, cursor + 24))
@@ -116,6 +124,16 @@ enum ZipImporter {
         guard !relative.isEmpty else { return nil }
         guard relative.allSatisfy({ !$0.isEmpty && $0 != ".." && $0 != "." }) else { return nil }
         return "Data/" + relative.joined(separator: "/")
+    }
+
+    private static func findZip64End(_ data: Data, before eocd: Int) -> Int? {
+        var offset = eocd - 20
+        let limit = max(0, eocd - 4096)
+        while offset >= limit {
+            if u32(data, offset) == 0x0606_4b50 { return offset }
+            offset -= 1
+        }
+        return nil
     }
 
     private static func findEndOfCentralDirectory(_ data: Data) -> Int? {
