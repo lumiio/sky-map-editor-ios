@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 struct RootView: View {
@@ -55,10 +56,10 @@ struct RootView: View {
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
             }
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: importTypes) { result in
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.folder, .item]) { result in
             switch result {
             case .success(let url): model.importSource(url)
-            case .failure(let error): model.error = "\(error)"
+            case .failure(let error): model.actionError = "选择文件失败：\(error.localizedDescription)"
             }
         }
         .sheet(isPresented: $showObjects) {
@@ -77,31 +78,35 @@ struct RootView: View {
                 .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("关闭") { model.showSelfTest = false } } }
             }
         }
-        .alert("出错了", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
-            Button("知道了", role: .cancel) { model.error = nil }
+        .sheet(isPresented: $model.showLog) {
+            NavigationStack {
+                ScrollView {
+                    Text(model.logText).font(.system(.caption2, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading).padding()
+                }
+                .navigationTitle("日志")
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("复制") { UIPasteboard.general.string = model.logText }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("关闭") { model.showLog = false }
+                    }
+                }
+            }
+        }
+        .alert("出错了", isPresented: Binding(get: { model.actionError != nil }, set: { if !$0 { model.actionError = nil } })) {
+            Button("知道了", role: .cancel) { model.actionError = nil }
         } message: {
-            Text(model.error ?? "")
+            Text(model.actionError ?? "")
         }
     }
-
-    // 允许选任意文件：zip、apk、ipa 都是 zip，认不出来会在解压时报错。
-    private var importTypes: [UTType] { [.folder, .item] }
 
     private var levelList: some View {
         NavigationStack {
             Group {
                 if model.levels.isEmpty {
-                    VStack(spacing: 14) {
-                        Image(systemName: "square.stack.3d.up.slash").font(.system(size: 44)).opacity(0.5)
-                        Text("还没有导入地图").font(.headline)
-                        Text("把 Data 压成 zip，或者直接用编辑器 apk / ipa，\n点下面按钮选它就行，会自动解出 Levels 和 Meshes，\n不会碰 Audio。也可以选已经解压好的 Data 文件夹。")
-                            .font(.callout).multilineTextAlignment(.center).opacity(0.7)
-                        Button("导入 zip / apk / ipa / 文件夹") { showImporter = true }
-                            .buttonStyle(.borderedProminent)
-                        Button("先看内置演示地形") { model.openDemo() }
-                            .buttonStyle(.bordered)
-                    }
-                    .padding()
+                    emptyState
                 } else {
                     List(model.levels) { level in
                         Button {
@@ -129,10 +134,60 @@ struct RootView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { model.runSelfTest() } label: { Image(systemName: "checkmark.shield") }
                 }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        model.readLog()
+                        model.showLog = true
+                    } label: { Image(systemName: "doc.text.magnifyingglass") }
+                }
             }
             .safeAreaInset(edge: .bottom) {
                 Text(model.status).font(.caption2).opacity(0.6).padding(6)
             }
+        }
+        .onAppear { model.refreshInbox() }
+    }
+
+    private var emptyState: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                Image(systemName: "shippingbox").font(.system(size: 42)).opacity(0.5)
+                Text("还没有地图").font(.headline)
+                Text("把 ipa / zip / apk 拷到「文件」App → 我的 iPhone → SkyMapEditor，\n回到这里点下面的「刷新文件列表」，然后点文件就能导入。\n也可以直接点「从文件里选」选它。")
+                    .font(.callout).multilineTextAlignment(.center).opacity(0.75)
+
+                if !model.inbox.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("App 里的包（\(model.inbox.count)）").font(.caption).opacity(0.6)
+                        ForEach(model.inbox) { item in
+                            Button {
+                                model.importInboxFile(item)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "shippingbox.fill")
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(item.name).font(.footnote).lineLimit(2)
+                                        Text(item.sizeText).font(.caption2).opacity(0.6)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "square.and.arrow.down")
+                                }
+                            }
+                        }
+                    }
+                    .padding()
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal)
+                }
+
+                VStack(spacing: 10) {
+                    Button("刷新文件列表") { model.refreshInbox() }
+                        .buttonStyle(.bordered)
+                    Button("从「文件」里选 ipa / zip / apk") { showImporter = true }
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(.vertical, 40)
         }
     }
 }

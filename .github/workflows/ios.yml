@@ -95,17 +95,25 @@ jobs:
           xcrun simctl bootstatus "$UDID" -b
           xcrun simctl install "$UDID" ios/build-sim/Build/Products/Release-iphonesimulator/SkyMapEditor.app
 
-          # 端到端自测：造一个结构合法的关卡（ipa 布局），导入后让 App 真正解析一遍。
+          # 端到端自测：走用户在「文件」App 里拷贝、App 内点导入的同一条路。
+          # 1) 造一个结构合法的关卡，打成 ipa 布局的 zip
           python3 qa/make_fixture.py /tmp/fixture
           (cd /tmp/fixture && zip -qry /tmp/test-import.zip Payload)
-          xcrun simctl terminate "$UDID" com.skyeditor.ios || true
-          xcrun simctl launch "$UDID" com.skyeditor.ios --extract /tmp/test-import.zip
-          sleep 12
+
+          # 2) 把这个包放进 App 沙盒的 Documents（等同于用户在「文件」里拷进去）
           BRIDGE=$(xcrun simctl get_app_container "$UDID" com.skyeditor.ios data)
-          echo "--- boot.log ---"
+          cp /tmp/test-import.zip "$BRIDGE/Documents/"
+
+          # 3) 走 App 内的「导入」路径
+          xcrun simctl terminate "$UDID" com.skyeditor.ios || true
+          xcrun simctl launch "$UDID" com.skyeditor.ios --import-inbox
+          sleep 15
           cat "$BRIDGE/Documents/boot.log" || true
-          if ! grep -q "extract-ok" "$BRIDGE/Documents/boot.log"; then
-            echo "extract failed"; exit 1
+          if ! grep -q "inbox-files 1" "$BRIDGE/Documents/boot.log"; then
+            echo "inbox did not see the archive"; exit 1
+          fi
+          if ! grep -q "inbox-import-ok" "$BRIDGE/Documents/boot.log"; then
+            echo "inbox import failed"; exit 1
           fi
           if [ ! -f "$BRIDGE/Documents/Data/Levels/Demo/Objects.level.bin" ]; then
             echo "missing Objects.level.bin"; exit 1
@@ -113,9 +121,9 @@ jobs:
           if [ ! -f "$BRIDGE/Documents/Data/Levels/Demo/BstBaked.meshes" ]; then
             echo "missing BstBaked.meshes"; exit 1
           fi
-          echo "zip import OK"
+          echo "inbox import OK"
 
-          # 解析自测：导入的数据必须真的被 TGCL/LVL0 解析器读进去
+          # 4) 导入的数据必须真的被 TGCL/LVL0 解析器读进去
           xcrun simctl terminate "$UDID" com.skyeditor.ios || true
           xcrun simctl launch "$UDID" com.skyeditor.ios --selftest
           sleep 12

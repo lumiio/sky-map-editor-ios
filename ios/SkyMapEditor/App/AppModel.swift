@@ -5,11 +5,15 @@ final class AppModel: ObservableObject {
     @Published var scene: LevelScene?
     @Published var status: String = "正在扫描地图…"
     @Published var error: String?
+    @Published var actionError: String?
     @Published var loading = false
     @Published var importing = false
     @Published var selfTest: [String] = []
     @Published var showSelfTest = false
     @Published var materialTint = false
+    @Published var inbox: [ImportCandidate] = []
+    @Published var logText = ""
+    @Published var showLog = false
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
@@ -22,6 +26,18 @@ final class AppModel: ObservableObject {
             } catch {
                 Log.line("解压测试失败：\(error)")
                 Log.line("extract-failed")
+            }
+        }
+        if arguments.contains("--import-inbox") {
+            let items = ImportInbox.scan()
+            Log.line("inbox-files \(items.count)")
+            if let first = items.first {
+                do {
+                    try ZipImporter.extract(first.url, to: LevelStore.dataRoot) { Log.line("解压：\($0)") }
+                    Log.line("inbox-import-ok")
+                } catch {
+                    Log.line("inbox-import-failed：\(error)")
+                }
             }
         }
         if arguments.contains("--selftest") {
@@ -48,6 +64,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func refreshInbox() {
+        inbox = ImportInbox.scan()
+    }
+
+    func readLog() {
+        let url = ImportInbox.documents.appendingPathComponent("boot.log")
+        logText = (try? String(contentsOf: url, encoding: .utf8)) ?? "（还没有日志）"
+    }
+
     func refresh() {
         status = "正在扫描地图…"
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -58,6 +83,10 @@ final class AppModel: ObservableObject {
                 self.status = found.isEmpty ? "还没有导入地图" : "\(found.count) 张地图"
             }
         }
+    }
+
+    func importInboxFile(_ candidate: ImportCandidate) {
+        importArchive(candidate.url)
     }
 
     /// 文件夹和 zip/apk 都走这里。
@@ -74,6 +103,7 @@ final class AppModel: ObservableObject {
         importing = true
         error = nil
         status = "正在解压 \(url.lastPathComponent)…"
+        Log.line("开始导入 \(url.lastPathComponent)")
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -85,11 +115,12 @@ final class AppModel: ObservableObject {
                     self?.importing = false
                     self?.status = "导入完成"
                     self?.refresh()
+                    self?.refreshInbox()
                 }
             } catch {
                 DispatchQueue.main.async {
                     self?.importing = false
-                    self?.error = "导入失败：\(error)"
+                    self?.actionError = "导入失败：\(error)"
                 }
             }
         }
@@ -110,7 +141,7 @@ final class AppModel: ObservableObject {
             } catch {
                 DispatchQueue.main.async {
                     self?.importing = false
-                    self?.error = "导入失败：\(error)"
+                    self?.actionError = "导入失败：\(error)"
                 }
             }
         }

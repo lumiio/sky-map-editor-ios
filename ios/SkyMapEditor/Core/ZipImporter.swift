@@ -17,7 +17,9 @@ enum ZipImporter {
     private static let maxTotalSize = 2 * 1024 * 1024 * 1024
 
     static func extract(_ url: URL, to root: URL, progress: (String) -> Void) throws {
+        Log.line("打开压缩包 \(url.lastPathComponent)")
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        Log.line("包大小 \(data.count / 1024 / 1024) MB")
         guard data.count > 22 else { throw FormatError.invalid("不是有效的 zip（文件太小）") }
 
         guard let eocd = findEndOfCentralDirectory(data) else {
@@ -42,6 +44,8 @@ enum ZipImporter {
         var totalBytes = 0
         var skipped = 0
         var entries = 0
+        var seenLevels = 0
+        var seenMeshes = 0
 
         // 目录项数量不依赖 EOCD 的 16 位字段：apk 很容易超过 65535 项，
         // 这里一直读到签名不匹配为止。
@@ -71,6 +75,7 @@ enum ZipImporter {
             cursor = next
 
             guard let destination = destination(for: name) else { continue }
+            if destination.hasPrefix("Levels/") { seenLevels += 1 } else { seenMeshes += 1 }
             guard !name.hasSuffix("/") else { continue }
             guard uncompressedSize <= maxEntrySize, compressedSize <= maxEntrySize else {
                 throw FormatError.invalid("\(name) 超出单个文件大小上限")
@@ -111,8 +116,9 @@ enum ZipImporter {
             }
         }
 
-        if written == 0 && skipped == 0 {
-            throw FormatError.invalid("压缩包里没有 Levels 或 Meshes")
+        Log.line("目录项 \(entries) 个，命中 Levels \(seenLevels) / Meshes \(seenMeshes)")
+        if seenLevels == 0 && seenMeshes == 0 {
+            throw FormatError.invalid("压缩包里没有 Levels 或 Meshes（找到 \(entries) 个文件，都不是地图数据）")
         }
         progress("解压完成：新增 \(written) 个文件，跳过 \(skipped) 个已存在")
     }
