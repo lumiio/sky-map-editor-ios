@@ -1,25 +1,33 @@
-"""模拟器自测：把 app 截的图找一遍，画面如果还是 clearColor 就判定一帧都没画上去。"""
-import sys
-from PIL import Image
+"""模拟器自测：截图里必须真的有渲染内容。
 
-CLEAR = (8, 13, 23)          # clearColor 0.03/0.05/0.09，sRGB 下约等于这个值
-TOLERANCE = 6
+判据：颜色种类够多、最大单色占比不高、中部区域不是纯色。
+不看具体颜色：清屏色是线性色经 sRGB 转换后的值，硬编码会误判。
+"""
+import sys
+from collections import Counter
+from PIL import Image
 
 path = sys.argv[1]
 image = Image.open(path).convert("RGB")
 width, height = image.size
 pixels = list(image.getdata())
+counter = Counter(pixels)
+top_color, top_count = counter.most_common(1)[0]
+ratio = top_count / len(pixels)
 
-distinct = len(set(pixels))
-clear = 0
-for r, g, b in pixels:
-    if abs(r - CLEAR[0]) <= TOLERANCE and abs(g - CLEAR[1]) <= TOLERANCE and abs(b - CLEAR[2]) <= TOLERANCE:
-        clear += 1
-clear_ratio = clear / len(pixels)
-top = sorted(set(pixels), key=pixels.count, reverse=True)[:5]
-print(f"{width}x{height} distinct={distinct} clear={clear_ratio:.3f} top={top}")
+center = image.crop((width // 4, height // 3, width * 3 // 4, height * 2 // 3))
+center_colors = len(Counter(center.getdata()))
 
-if distinct < 8 or clear_ratio > 0.97:
-    print("FAIL: 画面与清屏色一致，说明没有画出地形")
+print(f"{width}x{height} distinct={len(counter)} top={top_color} ratio={ratio:.3f} centerDistinct={center_colors}")
+
+failed = []
+if len(counter) < 64:
+    failed.append("颜色种类太少")
+if ratio > 0.90:
+    failed.append("最大单色占比过高")
+if center_colors < 16:
+    failed.append("画面中部是纯色")
+if failed:
+    print("FAIL:", "，".join(failed))
     sys.exit(1)
 print("PASS: 画面有真实渲染内容")

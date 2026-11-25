@@ -274,7 +274,7 @@ enum LevelStore {
         var models = 0
         var boundsMin = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
         var boundsMax = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
-        let vertexLimit = 4_000_000
+        let vertexLimit = 2_500_000
 
         func loadMesh(_ name: String) -> MeshResource? {
             if let hit = cache[name] { return hit }

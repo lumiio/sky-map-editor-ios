@@ -84,7 +84,7 @@ struct RootView: View {
                     VStack(spacing: 14) {
                         Image(systemName: "square.stack.3d.up.slash").font(.system(size: 44)).opacity(0.5)
                         Text("还没有导入地图").font(.headline)
-                        Text("在「文件」App 里准备好 Sky 的\nData/Levels 目录，然后点下面的按钮选择它。\n只会复制 Levels，不会碰 Audio。")
+                        Text("在「文件」App 里准备好 Sky 的 Data 目录\n（里面要有 Levels 和 Meshes），点下面的按钮选择它。\n只会复制 Levels 和 Meshes，不碰 Audio。")
                             .font(.callout).multilineTextAlignment(.center).opacity(0.7)
                         Button("导入 Data / Levels") { showImporter = true }
                             .buttonStyle(.borderedProminent)

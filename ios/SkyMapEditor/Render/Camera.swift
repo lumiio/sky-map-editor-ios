@@ -12,7 +12,8 @@ struct OrbitCamera {
         return target + direction * distance
     }
 
-    func viewProjection(aspect: Float, near: Float = 0.1) -> simd_float4x4 {
+    func viewProjection(aspect: Float) -> simd_float4x4 {
+        let near = max(0.05, distance * 0.01)
         let e = eye()
         let forward = normalize(target - e)
         let right = normalize(cross(forward, SIMD3<Float>(0, 1, 0)))
@@ -23,7 +24,7 @@ struct OrbitCamera {
             SIMD4<Float>(right.z, up.z, -forward.z, 0),
             SIMD4<Float>(-dot(right, e), -dot(up, e), dot(forward, e), 1)
         ))
-        let far = max(distance * 6, 200)
+        let far = max(distance * 12 + 100, 200)
         let y = 1 / tan(fovY * 0.5)
         let x = y / max(aspect, 0.0001)
         let z = far / (near - far)
