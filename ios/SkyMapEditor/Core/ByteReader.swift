@@ -77,7 +77,7 @@ struct ByteReader {
     mutating func count(_ maximum: Int = 2_000_000) throws -> UInt32 {
         let n = try u32()
         guard Int(n) <= maximum else {
-            throw FormatError.invalid("\(label): 数量超限 \(n)")
+            throw FormatError.invalid("\(label): 数量超限 \(n) @0x\(String(p - 4, radix: 16))")
         }
         return n
     }

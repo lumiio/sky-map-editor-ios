@@ -118,6 +118,7 @@ struct MeshesDocument {
                                     vertexCount: vertexCount, indexBytes: indexBytes))
         }
 
+        Log.line("LOD0 烘焙 \(meshCount) 条，结束 @0x\(String(reader.p, radix: 16))")
         let terrainCount = Int(try reader.count(100000))
         for index in 0..<terrainCount {
             let start = reader.p
@@ -189,6 +190,7 @@ struct MeshesDocument {
             geometries.append(record)
         }
 
+        Log.line("LOD0 地形 \(terrainCount) 条，结束 @0x\(String(reader.p, radix: 16))")
         let present = try reader.u32()
         hasCloud = present != 0
         if present != 0 {
@@ -215,6 +217,7 @@ struct MeshesDocument {
             }
         }
 
+        Log.line("LOD0 云 present=\(present)，结束 @0x\(String(reader.p, radix: 16))")
         let skirtCount = Int(try reader.count(100000))
         for index in 0..<skirtCount {
             let start = reader.p
