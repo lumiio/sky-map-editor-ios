@@ -136,6 +136,34 @@ jobs:
           fi
           echo "parse selftest OK"
 
+          # 真实数据回归：仓库里带两张真图（CandleSpace / CarryLand3），
+          # 走同一条导入路径，再逐张解析、把 CandleSpace 真渲染出来截图。
+          rm -rf "$BRIDGE/Documents/Data"
+          rm -f "$BRIDGE/Documents/test-import.zip"
+          (cd qa/realfixture && zip -qry /tmp/real-data.zip Data)
+          cp /tmp/real-data.zip "$BRIDGE/Documents/"
+          xcrun simctl terminate "$UDID" com.skyeditor.ios || true
+          xcrun simctl launch "$UDID" com.skyeditor.ios --import-inbox
+          sleep 20
+          xcrun simctl terminate "$UDID" com.skyeditor.ios || true
+          xcrun simctl launch "$UDID" com.skyeditor.ios --selftest
+          sleep 25
+          cat "$BRIDGE/Documents/boot.log" || true
+          if ! grep -q "selftest-done 2/2" "$BRIDGE/Documents/boot.log"; then
+            echo "real data selftest failed"; exit 1
+          fi
+          echo "real data parse OK"
+
+          xcrun simctl terminate "$UDID" com.skyeditor.ios || true
+          xcrun simctl launch "$UDID" com.skyeditor.ios --open CandleSpace
+          sleep 15
+          cat "$BRIDGE/Documents/boot.log" || true
+          if ! grep -q "open-ok CandleSpace" "$BRIDGE/Documents/boot.log"; then
+            echo "real level did not render"; exit 1
+          fi
+          xcrun simctl io "$UDID" screenshot /tmp/real-candlespace.png
+          echo "real level rendered"
+
           xcrun simctl terminate "$UDID" com.skyeditor.ios || true
           xcrun simctl launch "$UDID" com.skyeditor.ios --demo
           sleep 12
@@ -149,4 +177,6 @@ jobs:
         if: always()
         with:
           name: demo-screenshot
-          path: /tmp/demo.png
+          path: |
+            /tmp/demo.png
+            /tmp/real-candlespace.png

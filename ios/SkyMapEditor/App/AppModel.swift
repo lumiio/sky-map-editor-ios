@@ -58,6 +58,17 @@ final class AppModel: ObservableObject {
             return
         }
         refresh()
+        if let index = arguments.firstIndex(of: "--open"), index + 1 < arguments.count {
+            let name = arguments[index + 1]
+            do {
+                let built = try LevelStore.buildScene(name)
+                scene = built
+                status = "\(name)：\(built.triangleCount) 三角形 · \(built.objectCount) 对象"
+                Log.line("open-ok \(name) triangles=\(built.triangleCount) objects=\(built.objectCount) models=\(built.models?.modelCount ?? 0)")
+            } catch {
+                Log.line("open-failed \(name)：\(error)")
+            }
+        }
         if arguments.contains("--demo") {
             scene = LevelStore.demoScene()
             Log.line("演示地形已装载 \(scene?.triangleCount ?? 0) 三角形")
