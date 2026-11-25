@@ -19,8 +19,10 @@ final class AppModel: ObservableObject {
             do {
                 try ZipImporter.extract(url, to: LevelStore.dataRoot) { Log.line("解压：\($0)") }
                 Log.line("解压测试通过")
+                Log.line("extract-ok")
             } catch {
                 Log.line("解压测试失败：\(error)")
+                Log.line("extract-failed")
             }
             refresh()
         }
