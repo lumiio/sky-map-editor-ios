@@ -29,6 +29,7 @@ struct LevelScene {
     let objectCount: Int
     let classCounts: [(String, Int)]
     let bakeCount: Int
+    let models: ModelGeometry?
     var triangleCount: Int {
         draws.reduce(0) { $0 + $1.plan.indices.count / 3 }
     }
@@ -61,31 +62,40 @@ enum LevelStore {
         return out.sorted { $0.name < $1.name }
     }
 
-    /// 把用户选的文件夹里的 Levels 复制进沙盒。只复制地图目录，不碰 Audio。
-    static func importLevels(from url: URL, progress: (String) -> Void) throws {
+    /// 把用户选的文件夹里的 Levels 和 Meshes 复制进沙盒。Audio 之类的大目录不碰。
+    static func importData(from url: URL, progress: (String) -> Void) throws {
         let fm = FileManager.default
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
 
-        var source = url
-        if !fm.fileExists(atPath: source.appendingPathComponent("Objects.level.bin").path) {
-            let nested = source.appendingPathComponent("Levels", isDirectory: true)
-            if fm.fileExists(atPath: nested.path) { source = nested }
+        var root = url
+        if url.lastPathComponent == "Levels" { root = url.deletingLastPathComponent() }
+        if !fm.fileExists(atPath: root.appendingPathComponent("Levels", isDirectory: true).path) {
+            if fm.fileExists(atPath: url.appendingPathComponent("Objects.level.bin").path) {
+                root = url.deletingLastPathComponent().deletingLastPathComponent()
+            }
         }
-        let children = try fm.contentsOfDirectory(at: source, includingPropertiesForKeys: [.isDirectoryKey])
-        try fm.createDirectory(at: levelsRoot, withIntermediateDirectories: true)
+        guard fm.fileExists(atPath: root.appendingPathComponent("Levels").path) else {
+            throw FormatError.invalid("选中的文件夹里没有 Levels")
+        }
 
-        var copied = 0
-        for child in children {
-            let isDirectory = (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-            guard isDirectory else { continue }
-            let target = levelsRoot.appendingPathComponent(child.lastPathComponent, isDirectory: true)
-            if fm.fileExists(atPath: target.path) { continue }
-            try fm.copyItem(at: child, to: target)
-            copied += 1
-            progress("已导入 \(copied) 张地图：\(child.lastPathComponent)")
+        try fm.createDirectory(at: dataRoot, withIntermediateDirectories: true)
+        for folder in ["Levels", "Meshes"] {
+            let source = root.appendingPathComponent(folder, isDirectory: true)
+            guard fm.fileExists(atPath: source.path) else { continue }
+            let target = dataRoot.appendingPathComponent(folder, isDirectory: true)
+            try fm.createDirectory(at: target, withIntermediateDirectories: true)
+            let children = try fm.contentsOfDirectory(at: source, includingPropertiesForKeys: [.isDirectoryKey])
+            var copied = 0
+            for child in children {
+                let destination = target.appendingPathComponent(child.lastPathComponent)
+                if fm.fileExists(atPath: destination.path) { continue }
+                try fm.copyItem(at: child, to: destination)
+                copied += 1
+                if copied % 5 == 0 { progress("已复制 \(folder)：\(copied)/\(children.count)") }
+            }
+            progress("\(folder) 完成：新增 \(copied) 项")
         }
-        if copied == 0 { progress("没有新的地图目录（可能已经导入过）") }
     }
 
     /// 不用真实 Data 也能跑通的演示地形：同一套 36 字节顶点、同一套材质分类与绘制批次。
@@ -161,10 +171,12 @@ enum LevelStore {
                                vertexCount: (cells + 1) * (cells + 1), plan: plan,
                                boundsMin: SIMD3<Float>(-extent, -9, -extent),
                                boundsMax: SIMD3<Float>(extent, 9, extent), isSkirt: false)
+        let models = demoCubes()
+        Log.line("演示模型 \(models.modelCount) 个 / 顶点 \(models.vertexCount)")
         return LevelScene(name: "演示地形", draws: [draw],
                           boundsMin: SIMD3<Float>(-extent, -9, -extent),
                           boundsMax: SIMD3<Float>(extent, 9, extent),
-                          objectCount: 0, classCounts: [], bakeCount: 0)
+                          objectCount: 0, classCounts: [], bakeCount: 0, models: models)
     }
 
     private static func strideIds(_ vertices: [UInt8], stride: Int, count: Int) -> [UInt8] {
@@ -222,9 +234,135 @@ enum LevelStore {
 
         if boundsMin.x > boundsMax.x { boundsMin = .zero; boundsMax = .zero }
 
+        let models = try? loadModels(objects)
+        if let models {
+            boundsMin = simd_min(boundsMin, models.boundsMin)
+            boundsMax = simd_max(boundsMax, models.boundsMax)
+        }
         return LevelScene(name: name, draws: draws, boundsMin: boundsMin, boundsMax: boundsMax,
                           objectCount: objects.nodes.count, classCounts: objects.nodeCounts(),
-                          bakeCount: meshes.bakes.count)
+                          bakeCount: meshes.bakes.count, models: models)
+    }
+
+    /// LevelMesh 实例 → 一份合并几何。位置在 CPU 侧乘过各自的 transform，
+    /// 渲染时一条 draw 就够；材质颜色暂时用白色 × 顶点色，和编辑器 basic 视口一致。
+    static func loadModels(_ objects: TGCLDocument) throws -> ModelGeometry? {
+        let meshesRoot = dataRoot.appendingPathComponent("Meshes", isDirectory: true)
+            .appendingPathComponent("Bin", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: meshesRoot.path) else { return nil }
+
+        var cache: [String: MeshResource] = [:]
+        var vertices: [UInt8] = []
+        var indices: [UInt32] = []
+        var base: UInt32 = 0
+        var models = 0
+        var boundsMin = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+        var boundsMax = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+        let vertexLimit = 4_000_000
+
+        func loadMesh(_ name: String) -> MeshResource? {
+            if let hit = cache[name] { return hit }
+            var candidates = ["\(name).mesh"]
+            for suffix in ["_StripAnim", "_CompOcc", "_CompEdges"] {
+                candidates.append("\(name)\(suffix).mesh")
+            }
+            for candidate in candidates {
+                let url = meshesRoot.appendingPathComponent(candidate)
+                guard let data = try? Data(contentsOf: url) else { continue }
+                guard let mesh = try? MeshResource([UInt8](data)) else { continue }
+                cache[name] = mesh
+                return mesh
+            }
+            return nil
+        }
+
+        for node in objects.nodes where node.className == "LevelMesh" {
+            if let enabled = node.field("enabled")?.value, case .byte(let flag) = enabled, flag == 0 { continue }
+            guard let nameField = node.field("resourceName"), case .text(let resource) = nameField.value,
+                  !resource.isEmpty else { continue }
+            guard let transform = node.field("transform"), case .floats(let matrix) = transform.value,
+                  matrix.count == 16 else { continue }
+            guard let mesh = loadMesh(resource) else { continue }
+            let lod = mesh.lod
+            if vertices.count / 20 + lod.vertexCount > vertexLimit { break }
+
+            for i in 0..<lod.vertexCount {
+                let p = SIMD3<Float>(lod.positions[i * 3], lod.positions[i * 3 + 1], lod.positions[i * 3 + 2])
+                let n = SIMD3<Float>(lod.normals[i * 3], lod.normals[i * 3 + 1], lod.normals[i * 3 + 2])
+                let world = transformPoint(matrix, p)
+                let normal = transformNormal(matrix, n)
+                appendFloat(&vertices, world.x); appendFloat(&vertices, world.y); appendFloat(&vertices, world.z)
+                vertices.append(UInt8(bitPattern: Int8(clamping: Int(normal.x * 127))))
+                vertices.append(UInt8(bitPattern: Int8(clamping: Int(normal.y * 127))))
+                vertices.append(UInt8(bitPattern: Int8(clamping: Int(normal.z * 127))))
+                vertices.append(0)
+                for lane in 0..<4 {
+                    vertices.append(UInt8(clamping: Int(lod.colors[i * 4 + lane] * 255)))
+                }
+                boundsMin = simd_min(boundsMin, world)
+                boundsMax = simd_max(boundsMax, world)
+            }
+            for index in lod.indices { indices.append(index + base) }
+            base += UInt32(lod.vertexCount)
+            models += 1
+        }
+        guard models > 0 else { return nil }
+        Log.line("LevelMesh 合并 \(models) 个 / 顶点 \(vertices.count / 20) / 索引 \(indices.count)")
+        return ModelGeometry(vertices: vertices, vertexCount: vertices.count / 20, indices: indices,
+                             modelCount: models, boundsMin: boundsMin, boundsMax: boundsMax)
+    }
+
+    /// 演示用方块：和三万多个 LevelMesh 顶点走同一条模型管线。
+    private static func demoCubes() -> ModelGeometry {
+        var vertices: [UInt8] = []
+        var indices: [UInt32] = []
+        let faces: [(SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)] = [
+            (SIMD3(1,0,0), SIMD3(0,1,0), SIMD3(0,0,1)),
+            (SIMD3(-1,0,0), SIMD3(0,1,0), SIMD3(0,0,-1)),
+            (SIMD3(0,1,0), SIMD3(0,0,1), SIMD3(1,0,0)),
+            (SIMD3(0,-1,0), SIMD3(0,0,1), SIMD3(-1,0,0)),
+            (SIMD3(0,0,1), SIMD3(1,0,0), SIMD3(0,1,0)),
+            (SIMD3(0,0,-1), SIMD3(1,0,0), SIMD3(0,-1,0))
+        ]
+        let placements: [(SIMD3<Float>, Float)] = [(SIMD3(0, 2, 0), 2.4), (SIMD3(9, 1.4, -6), 1.6), (SIMD3(-8, 3, 7), 2.0)]
+        var base: UInt32 = 0
+        for (center, size) in placements {
+            for (normal, tangent, bitangent) in faces {
+                for corner in [(-1, -1), (1, -1), (1, 1), (-1, 1)] {
+                    let p = center + (normal + tangent * Float(corner.0) + bitangent * Float(corner.1)) * (size * 0.5)
+                    appendFloat(&vertices, p.x); appendFloat(&vertices, p.y); appendFloat(&vertices, p.z)
+                    vertices.append(UInt8(bitPattern: Int8(clamping: Int(normal.x * 127))))
+                    vertices.append(UInt8(bitPattern: Int8(clamping: Int(normal.y * 127))))
+                    vertices.append(UInt8(bitPattern: Int8(clamping: Int(normal.z * 127))))
+                    vertices.append(0)
+                    vertices.append(230); vertices.append(210); vertices.append(180); vertices.append(255)
+                }
+                indices.append(contentsOf: [base, base + 1, base + 2, base, base + 2, base + 3])
+                base += 4
+            }
+        }
+        return ModelGeometry(vertices: vertices, vertexCount: vertices.count / 20, indices: indices,
+                             modelCount: placements.count,
+                             boundsMin: SIMD3<Float>(-11, -1, -9), boundsMax: SIMD3<Float>(11, 5, 9))
+    }
+
+    private static func appendFloat(_ out: inout [UInt8], _ value: Float) {
+        var bits = value.bitPattern.littleEndian
+        withUnsafeBytes(of: &bits) { out.append(contentsOf: $0) }
+    }
+
+    private static func transformPoint(_ m: [Float], _ p: SIMD3<Float>) -> SIMD3<Float> {
+        SIMD3<Float>(m[0] * p.x + m[4] * p.y + m[8] * p.z + m[12],
+                     m[1] * p.x + m[5] * p.y + m[9] * p.z + m[13],
+                     m[2] * p.x + m[6] * p.y + m[10] * p.z + m[14])
+    }
+
+    private static func transformNormal(_ m: [Float], _ n: SIMD3<Float>) -> SIMD3<Float> {
+        let world = SIMD3<Float>(m[0] * n.x + m[4] * n.y + m[8] * n.z,
+                                 m[1] * n.x + m[5] * n.y + m[9] * n.z,
+                                 m[2] * n.x + m[6] * n.y + m[10] * n.z)
+        let length = simd_length(world)
+        return length > 0.00001 ? world / length : SIMD3<Float>(0, 1, 0)
     }
 
     private static func bounds(_ vertices: MeshSurfaces.MaterialVertices, stride: Int, fallback: [Float]) -> (SIMD3<Float>, SIMD3<Float>) {

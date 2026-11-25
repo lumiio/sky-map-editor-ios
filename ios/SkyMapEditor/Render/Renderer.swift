@@ -14,6 +14,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var terrainBlend: MTLRenderPipelineState?
     private var skirtBlend: MTLRenderPipelineState?
     private var skyPipeline: MTLRenderPipelineState?
+    private var modelPipeline: MTLRenderPipelineState?
+    private var modelDraw: GPUDraw?
     private var depthWriteState: MTLDepthStencilState?
     private var depthReadState: MTLDepthStencilState?
 
@@ -82,6 +84,30 @@ final class Renderer: NSObject, MTKViewDelegate {
         return descriptor
     }
 
+    private func makeModelPipeline(_ view: MTKView) -> MTLRenderPipelineState? {
+        guard let library else { return nil }
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = library.makeFunction(name: "vsModel")
+        descriptor.fragmentFunction = library.makeFunction(name: "fsModel")
+        let vertices = MTLVertexDescriptor()
+        vertices.attributes[0].format = .float3
+        vertices.attributes[0].offset = 0
+        vertices.attributes[0].bufferIndex = 0
+        vertices.attributes[1].format = .char4Normalized
+        vertices.attributes[1].offset = 12
+        vertices.attributes[1].bufferIndex = 0
+        vertices.attributes[2].format = .uchar4Normalized
+        vertices.attributes[2].offset = 16
+        vertices.attributes[2].bufferIndex = 0
+        vertices.layouts[0].stride = 20
+        vertices.layouts[0].stepFunction = .perVertex
+        descriptor.vertexDescriptor = vertices
+        descriptor.rasterSampleCount = view.sampleCount
+        descriptor.depthAttachmentPixelFormat = view.depthStencilPixelFormat
+        descriptor.colorAttachments[0].pixelFormat = view.colorPixelFormat
+        return try? device.makeRenderPipelineState(descriptor: descriptor)
+    }
+
     private func makePipeline(_ view: MTKView, fragment: String, stride: Int, blend: Bool) -> MTLRenderPipelineState? {
         guard let library else { return nil }
         let descriptor = MTLRenderPipelineDescriptor()
@@ -120,7 +146,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         terrainOpaque = makePipeline(view, fragment: "fsTerrain", stride: 36, blend: false)
         terrainBlend = makePipeline(view, fragment: "fsTerrain", stride: 36, blend: true)
         skirtBlend = makePipeline(view, fragment: "fsTerrain", stride: 40, blend: true)
-        Log.line("管线 sky=\(skyPipeline != nil) terrain=\(terrainOpaque != nil) blend=\(terrainBlend != nil) skirt=\(skirtBlend != nil)")
+        modelPipeline = makeModelPipeline(view)
+        Log.line("管线 sky=\(skyPipeline != nil) terrain=\(terrainOpaque != nil) blend=\(terrainBlend != nil) skirt=\(skirtBlend != nil) model=\(modelPipeline != nil)")
     }
 
     private func buildDepthStates() {
@@ -160,6 +187,18 @@ final class Renderer: NSObject, MTKViewDelegate {
                                  isSkirt: draw.isSkirt))
         }
         draws = built
+        if let models = scene.models, !models.indices.isEmpty,
+           let vertexBuffer = device.makeBuffer(bytes: models.vertices, length: models.vertices.count, options: .storageModeShared),
+           let indexBuffer = device.makeBuffer(bytes: models.indices, length: models.indices.count * MemoryLayout<UInt32>.stride, options: .storageModeShared) {
+            let plan = SurfacePlan(indices: models.indices, batches: [
+                SurfaceBatch(surface: 0, materialIndex: 0, materialId: 0, pass: .opaque, start: 0, count: models.indices.count)
+            ])
+            modelDraw = GPUDraw(vertexBuffer: vertexBuffer, indexBuffer: indexBuffer, plan: plan,
+                                defs: [], isSkirt: false)
+            Log.line("模型上传：\(models.modelCount) 个实例 / 顶点 \(models.vertexCount)")
+        } else {
+            modelDraw = nil
+        }
         sceneName = scene.name
         camera.frame(min: frameMin, max: frameMax)
         Log.line("上传 \(scene.name)：\(built.count) 段 / 批次 \(built.reduce(0) { $0 + $1.plan.batches.count }) / 相机 \(camera.distance)")
@@ -185,6 +224,16 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
 
         encode(draws.filter { !$0.isSkirt }, pass: .opaque, encoder: encoder, viewProj: &viewProj)
+        if let modelDraw, let modelPipeline {
+            encoder.setRenderPipelineState(modelPipeline)
+            encoder.setDepthStencilState(depthWriteState)
+            encoder.setVertexBuffer(modelDraw.vertexBuffer, offset: 0, index: 0)
+            encoder.setVertexBytes(&viewProj, length: MemoryLayout<simd_float4x4>.stride, index: 1)
+            var color = SIMD4<Float>(1, 1, 1, 1)
+            encoder.setFragmentBytes(&color, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
+            encoder.drawIndexedPrimitives(type: .triangle, indexCount: modelDraw.plan.indices.count, indexType: .uint32,
+                                          indexBuffer: modelDraw.indexBuffer, indexBufferOffset: 0)
+        }
         encode(draws.filter { !$0.isSkirt }, pass: .decal, encoder: encoder, viewProj: &viewProj)
         encode(draws.filter { $0.isSkirt }, pass: .skirt, encoder: encoder, viewProj: &viewProj)
 

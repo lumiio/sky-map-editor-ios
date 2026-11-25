@@ -30,10 +30,10 @@ final class AppModel: ObservableObject {
 
     func importFolder(_ url: URL) {
         importing = true
-        status = "正在导入 Levels…"
+        status = "正在导入 Levels / Meshes…"
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {
-                try LevelStore.importLevels(from: url) { message in
+                try LevelStore.importData(from: url) { message in
                     DispatchQueue.main.async { self?.status = message }
                 }
                 DispatchQueue.main.async {

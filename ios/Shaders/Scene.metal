@@ -73,3 +73,34 @@ fragment float4 fsTerrain(TerrainOut in [[stage_in]],
     float lighting = 0.55 + 0.45 * abs(in.normal.y) / normalLength;
     return float4(color.rgb * lighting, alpha);
 }
+
+struct ModelIn {
+    float3 position [[attribute(0)]];
+    float4 normal   [[attribute(1)]];
+    float4 color    [[attribute(2)]];
+};
+
+struct ModelOut {
+    float4 position [[position]];
+    float3 normal;
+    float4 color;
+};
+
+vertex ModelOut vsModel(ModelIn in [[stage_in]],
+                        constant float4x4 &viewProj [[buffer(1)]]) {
+    ModelOut out;
+    out.position = viewProj * float4(in.position, 1.0);
+    out.normal = in.normal.xyz;
+    out.color = in.color;
+    return out;
+}
+
+fragment float4 fsModel(ModelOut in [[stage_in]],
+                        constant float4 &color [[buffer(0)]]) {
+    float normalLength = max(length(in.normal), 0.00001);
+    float lighting = 0.55 + 0.45 * abs(in.normal.y) / normalLength;
+    float3 tint = color.rgb * in.color.rgb * lighting;
+    float alpha = color.a * in.color.a;
+    if (alpha <= 0.0) { discard_fragment(); }
+    return float4(tint, alpha);
+}
