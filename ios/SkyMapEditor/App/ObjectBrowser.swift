@@ -113,8 +113,8 @@ private struct FieldList: View {
                     Spacer()
                     Text(field.kind.rawValue).font(.caption2).foregroundStyle(.secondary)
                 }
-                if !field.value.displayValue.isEmpty {
-                    Text(field.value.displayValue).font(.caption).textSelection(.enabled)
+                if !field.displayValue.isEmpty {
+                    Text(field.displayValue).font(.caption).textSelection(.enabled)
                 }
                 if !field.children.isEmpty {
                     Text("\(field.children.count) 项").font(.caption2).foregroundStyle(.secondary)
@@ -168,7 +168,7 @@ private struct FieldEditor: View {
                 }
             }
             .onAppear {
-                if text.isEmpty { text = field.value.displayValue }
+                if text.isEmpty { text = field.displayValue }
             }
         }
         .presentationDetents([.medium, .large])
@@ -186,3 +186,7 @@ private struct FieldEditor: View {
         }
     }
 }
+
+
+extension TGCLNode: Identifiable {}
+extension TGCLField: Identifiable {}
