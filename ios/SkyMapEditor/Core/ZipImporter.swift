@@ -123,7 +123,8 @@ enum ZipImporter {
         let relative = parts[index...]
         guard !relative.isEmpty else { return nil }
         guard relative.allSatisfy({ !$0.isEmpty && $0 != ".." && $0 != "." }) else { return nil }
-        return "Data/" + relative.joined(separator: "/")
+        // root 已经是 Documents/Data，这一层不能再重复
+        return relative.joined(separator: "/")
     }
 
     private static func findZip64End(_ data: Data, before eocd: Int) -> Int? {
