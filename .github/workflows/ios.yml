@@ -165,14 +165,14 @@ jobs:
           echo "real data parse OK"
 
           xcrun simctl terminate "$UDID" com.skyeditor.ios || true
-          xcrun simctl launch "$UDID" com.skyeditor.ios --open CandleSpace
-          if ! wait_for_log "open-ok CandleSpace"; then
+          xcrun simctl launch "$UDID" com.skyeditor.ios --open CarryLand3
+          if ! wait_for_log "open-ok CarryLand3"; then
             echo "real level did not open"
             cat "$BRIDGE/Documents/boot.log" || true
             exit 1
           fi
           sleep 5
-          xcrun simctl io "$UDID" screenshot /tmp/real-candlespace.png
+          xcrun simctl io "$UDID" screenshot /tmp/real-carryland3.png
           echo "real level rendered"
 
       - uses: actions/upload-artifact@v4
@@ -181,4 +181,4 @@ jobs:
           name: demo-screenshot
           path: |
             /tmp/demo.png
-            /tmp/real-candlespace.png
+            /tmp/real-carryland3.png
