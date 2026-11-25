@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct RootView: View {
     @StateObject private var model = AppModel()
     @State private var showImporter = false
+    @State private var showObjects = false
 
     var body: some View {
         ZStack {
@@ -24,6 +25,12 @@ struct RootView: View {
                                 .font(.caption2).opacity(0.8)
                         }
                         Spacer()
+                        Button {
+                            showObjects = true
+                        } label: {
+                            Image(systemName: "list.bullet.indent").font(.headline)
+                                .padding(10).background(.ultraThinMaterial, in: Circle())
+                        }
                     }
                     Spacer()
                     Text(model.status)
@@ -45,6 +52,22 @@ struct RootView: View {
             switch result {
             case .success(let url): model.importFolder(url)
             case .failure(let error): model.error = "\(error)"
+            }
+        }
+        .sheet(isPresented: $showObjects) {
+            if let scene = model.scene {
+                ObjectBrowser(scene: scene) { bytes in
+                    model.save(level: scene.name, bytes: bytes)
+                }
+            }
+        }
+        .sheet(isPresented: $model.showSelfTest) {
+            NavigationStack {
+                List(model.selfTest, id: \.self) { line in
+                    Text(line).font(.footnote).textSelection(.enabled)
+                }
+                .navigationTitle("解析自检")
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("关闭") { model.showSelfTest = false } } }
             }
         }
         .alert("出错了", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
@@ -92,6 +115,9 @@ struct RootView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showImporter = true } label: { Image(systemName: "square.and.arrow.down") }
+                }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { model.runSelfTest() } label: { Image(systemName: "checkmark.shield") }
                 }
             }
             .safeAreaInset(edge: .bottom) {

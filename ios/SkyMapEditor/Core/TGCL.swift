@@ -19,6 +19,7 @@ enum FieldValue {
 }
 
 struct TGCLField {
+    let id: String
     let name: String
     let kind: FieldKind
     let offset: Int
@@ -138,7 +139,7 @@ struct TGCLDocument {
             guard classIndex >= 0, classIndex < classList.count else {
                 throw FormatError.invalid("无效类索引 \(classIndex)")
             }
-            let fields = try TGCLDocument.readFields(&reader, classes: classList, classIndex: classIndex, depth: 0)
+            let fields = try TGCLDocument.readFields(&reader, classes: classList, classIndex: classIndex, depth: 0, prefix: "n\(index)")
             nodeList.append(TGCLNode(id: index, name: nodeName, classIndex: classIndex,
                                      className: classList[classIndex].name, fields: fields))
         }
@@ -150,12 +151,12 @@ struct TGCLDocument {
         nodes = nodeList
     }
 
-    private static func readFields(_ reader: inout ByteReader, classes: [TGCLClass], classIndex: Int, depth: Int) throws -> [TGCLField] {
+    private static func readFields(_ reader: inout ByteReader, classes: [TGCLClass], classIndex: Int, depth: Int, prefix: String) throws -> [TGCLField] {
         guard depth <= 64, classIndex >= 0, classIndex < classes.count else {
             throw FormatError.invalid("递归类结构无效")
         }
         var out: [TGCLField] = []
-        for property in classes[classIndex].properties {
+        for (propertyIndex, property) in classes[classIndex].properties.enumerated() {
             let offset = reader.p
             var kind = FieldKind.raw
             var value = FieldValue.none
@@ -207,21 +208,24 @@ struct TGCLDocument {
                     for index in 0..<count {
                         let at = reader.p
                         let word = try reader.u32()
-                        children.append(TGCLField(name: "[\(index)]", kind: .reference, offset: at,
-                                                  length: 4, value: .word(word), children: []))
+                        children.append(TGCLField(id: "\(prefix)/p\(propertyIndex)/a\(index)", name: "[\(index)]",
+                                                  kind: .reference, offset: at, length: 4,
+                                                  value: .word(word), children: []))
                     }
                 } else {
                     let nested = Int(property.classIndex)
                     for index in 0..<count {
                         let at = reader.p
-                        let sub = try TGCLDocument.readFields(&reader, classes: classes, classIndex: nested, depth: depth + 1)
-                        children.append(TGCLField(name: "[\(index)] \(classes[nested].name)", kind: .structValue,
+                        let sub = try TGCLDocument.readFields(&reader, classes: classes, classIndex: nested, depth: depth + 1,
+                                                              prefix: "\(prefix)/p\(propertyIndex)/a\(index)")
+                        children.append(TGCLField(id: "\(prefix)/p\(propertyIndex)/a\(index)",
+                                                  name: "[\(index)] \(classes[nested].name)", kind: .structValue,
                                                   offset: at, length: reader.p - at, value: .none, children: sub))
                     }
                 }
             }
 
-            out.append(TGCLField(name: property.name, kind: kind, offset: offset,
+            out.append(TGCLField(id: "\(prefix)/p\(propertyIndex)", name: property.name, kind: kind, offset: offset,
                                  length: reader.p - offset, value: value, children: children))
         }
         return out

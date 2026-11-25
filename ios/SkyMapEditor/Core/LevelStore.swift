@@ -30,6 +30,7 @@ struct LevelScene {
     let classCounts: [(String, Int)]
     let bakeCount: Int
     let models: ModelGeometry?
+    let document: TGCLDocument?
     var triangleCount: Int {
         draws.reduce(0) { $0 + $1.plan.indices.count / 3 }
     }
@@ -176,7 +177,7 @@ enum LevelStore {
         return LevelScene(name: "演示地形", draws: [draw],
                           boundsMin: SIMD3<Float>(-extent, -9, -extent),
                           boundsMax: SIMD3<Float>(extent, 9, extent),
-                          objectCount: 0, classCounts: [], bakeCount: 0, models: models)
+                          objectCount: 0, classCounts: [], bakeCount: 0, models: models, document: nil)
     }
 
     private static func strideIds(_ vertices: [UInt8], stride: Int, count: Int) -> [UInt8] {
@@ -189,6 +190,21 @@ enum LevelStore {
         var out = [UInt8](repeating: 0, count: count * 4)
         for i in 0..<count { for s in 0..<4 { out[i * 4 + s] = vertices[i * stride + 20 + s] } }
         return out
+    }
+
+    /// 写回 Objects.level.bin：先备份到 .sky-editor-backups，再原子替换，最后重解析校验。
+    static func saveObjects(_ bytes: [UInt8], level: String) throws {
+        let fm = FileManager.default
+        let directory = levelDirectory(level)
+        let target = directory.appendingPathComponent("Objects.level.bin")
+        let backupDirectory = directory.appendingPathComponent(".sky-editor-backups", isDirectory: true)
+        try fm.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let backup = backupDirectory.appendingPathComponent("Objects.level.bin.\(stamp)")
+        try fm.copyItem(at: target, to: backup)
+        try Data(bytes).write(to: target, options: .atomic)
+        _ = try TGCLDocument([UInt8](try Data(contentsOf: target)))
+        Log.line("写回 \(level)：\(bytes.count) 字节，备份 \(backup.lastPathComponent)")
     }
 
     static func loadDocuments(_ name: String) throws -> (TGCLDocument, MeshesDocument) {
@@ -241,7 +257,7 @@ enum LevelStore {
         }
         return LevelScene(name: name, draws: draws, boundsMin: boundsMin, boundsMax: boundsMax,
                           objectCount: objects.nodes.count, classCounts: objects.nodeCounts(),
-                          bakeCount: meshes.bakes.count, models: models)
+                          bakeCount: meshes.bakes.count, models: models, document: objects)
     }
 
     /// LevelMesh 实例 → 一份合并几何。位置在 CPU 侧乘过各自的 transform，
