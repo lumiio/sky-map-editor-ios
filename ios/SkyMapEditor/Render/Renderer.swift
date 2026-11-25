@@ -21,6 +21,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var pendingScene: LevelScene?
     private var draws: [GPUDraw] = []
     private(set) var sceneName = ""
+    private var loggedFirstFrame = false
 
     struct FragmentParams {
         var materialId: UInt32 = 0
@@ -101,7 +102,12 @@ final class Renderer: NSObject, MTKViewDelegate {
     }
 
     private func buildPipelines(view: MTKView) {
-        library = try? device.makeDefaultLibrary(bundle: .main)
+        do {
+            library = try device.makeDefaultLibrary(bundle: .main)
+        } catch {
+            library = nil
+            Log.line("默认库不可用: \(error)")
+        }
         guard let library else { return }
         let sky = MTLRenderPipelineDescriptor()
         sky.vertexFunction = library.makeFunction(name: "vsSky")
@@ -114,6 +120,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         terrainOpaque = makePipeline(view, fragment: "fsTerrain", stride: 36, blend: false)
         terrainBlend = makePipeline(view, fragment: "fsTerrain", stride: 36, blend: true)
         skirtBlend = makePipeline(view, fragment: "fsTerrain", stride: 40, blend: true)
+        Log.line("管线 sky=\(skyPipeline != nil) terrain=\(terrainOpaque != nil) blend=\(terrainBlend != nil) skirt=\(skirtBlend != nil)")
     }
 
     private func buildDepthStates() {
@@ -155,6 +162,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         draws = built
         sceneName = scene.name
         camera.frame(min: frameMin, max: frameMax)
+        Log.line("上传 \(scene.name)：\(built.count) 段 / 批次 \(built.reduce(0) { $0 + $1.plan.batches.count }) / 相机 \(camera.distance)")
     }
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
@@ -183,6 +191,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         encoder.endEncoding()
         buffer.present(drawable)
         buffer.commit()
+        if !loggedFirstFrame {
+            loggedFirstFrame = true
+            Log.line("首帧完成：vao=\(draws.count) 尺寸=\(Int(size.width))x\(Int(size.height))")
+        }
     }
 
     private enum PassKind { case opaque, decal, skirt }

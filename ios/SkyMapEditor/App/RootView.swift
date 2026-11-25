@@ -65,6 +65,8 @@ struct RootView: View {
                             .font(.callout).multilineTextAlignment(.center).opacity(0.7)
                         Button("导入 Data / Levels") { showImporter = true }
                             .buttonStyle(.borderedProminent)
+                        Button("先看内置演示地形") { model.openDemo() }
+                            .buttonStyle(.bordered)
                     }
                     .padding()
                 } else {

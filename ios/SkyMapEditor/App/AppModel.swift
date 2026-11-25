@@ -10,6 +10,10 @@ final class AppModel: ObservableObject {
 
     init() {
         refresh()
+        if ProcessInfo.processInfo.arguments.contains("--demo") {
+            scene = LevelStore.demoScene()
+            Log.line("演示地形已装载 \(scene?.triangleCount ?? 0) 三角形")
+        }
     }
 
     func refresh() {
@@ -65,6 +69,11 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+    }
+
+    func openDemo() {
+        scene = LevelStore.demoScene()
+        status = "演示地形：\(scene?.triangleCount ?? 0) 三角形"
     }
 
     func close() {
