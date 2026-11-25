@@ -66,7 +66,7 @@ struct MeshResource {
         var colors = [Float](repeating: 0, count: vertexCount * 4)
         for i in 0..<vertexCount {
             for lane in 0..<3 {
-                positions[i * 3 + lane] = readFloat(positionBytes, i * 16 + lane * 4)
+                positions[i * 3 + lane] = MeshResource.readFloat(positionBytes, i * 16 + lane * 4)
                 let raw = Int8(bitPattern: normalBytes[i * 4 + lane])
                 normals[i * 3 + lane] = max(-1, Float(raw) / 127)
             }
@@ -80,7 +80,7 @@ struct MeshResource {
                   colors: colors, indices: indices, bounds: bounds, lodDistance: lodDistance)
     }
 
-    private func readFloat(_ bytes: [UInt8], _ at: Int) -> Float {
+    private static func readFloat(_ bytes: [UInt8], _ at: Int) -> Float {
         let bits = UInt32(bytes[at]) | (UInt32(bytes[at + 1]) << 8) | (UInt32(bytes[at + 2]) << 16) | (UInt32(bytes[at + 3]) << 24)
         return Float(bitPattern: bits)
     }
