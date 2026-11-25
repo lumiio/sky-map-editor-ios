@@ -202,10 +202,10 @@ struct MeshesDocument {
             _ = try reader.take(Int(dx) * Int(dy) * Int(dz))
             let blocks = Int(try reader.count(10000000))
             _ = try reader.take(blocks * 6)
-            for _ in 0..<3 {
-                let size = Int(try reader.count(100000000))
-                _ = try reader.take(size)
-            }
+            // 三个分段大小是连续存的：必须先读完三个，再依次跳过各自的数据
+            var chunkSizes: [Int] = []
+            for _ in 0..<3 { chunkSizes.append(Int(try reader.count(100000000))) }
+            for size in chunkSizes { _ = try reader.take(size) }
             _ = try reader.f32()   // sunOcclusionScale
             _ = try reader.u32(); _ = try reader.u32()
             let vc = Int(try reader.count(65536))
